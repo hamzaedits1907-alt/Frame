@@ -1,0 +1,18 @@
+# Local data
+exports/
+.frame-tmp/
+app/_test/
+_legacy/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Build output
+dist/
+build/frame.ico
