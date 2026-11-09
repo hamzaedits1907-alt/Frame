@@ -12,8 +12,8 @@ $bat = Join-Path $Root 'start.bat'
 $txt = [IO.File]::ReadAllText($bat) -replace "`r?`n", "`r`n"
 [IO.File]::WriteAllText($bat, $txt, (New-Object Text.ASCIIEncoding))
 
-# ---- 1. Update package -------------------------------------------------------------------------
-$zipPath = Join-Path $dist 'frame-app.zip'
+# ---- 1. App package (embedded in Frame.exe; the update zip adds the launcher on top) -----------
+$zipPath = Join-Path $dist 'payload.zip'
 if (Test-Path $zipPath) { Remove-Item $zipPath }
 $fs = [IO.File]::Open($zipPath, [IO.FileMode]::Create)
 $zip = New-Object IO.Compression.ZipArchive($fs, [IO.Compression.ZipArchiveMode]::Create)
@@ -69,8 +69,18 @@ $fw = Split-Path $csc
 $src = Join-Path $env:TEMP "frame-launcher-$ver.cs"
 (Get-Content (Join-Path $PSScriptRoot 'launcher.cs') -Raw).Replace('%VERSION%', $ver) | Set-Content $src -Encoding UTF8
 $exe = Join-Path $dist 'Frame.exe'
-& $csc /nologo /target:winexe /optimize+ "/out:$exe" "/win32icon:$ico" "/resource:$zipPath,payload.zip" `
-  "/r:$fw\System.IO.Compression.dll" "/r:$fw\System.IO.Compression.FileSystem.dll" /r:System.Windows.Forms.dll /r:System.Drawing.dll $src
+$wv = Join-Path $PSScriptRoot 'webview2'
+& $csc /nologo /target:winexe /platform:x64 /optimize+ "/out:$exe" "/win32icon:$ico" "/resource:$zipPath,payload.zip" `
+  "/resource:$wv\Microsoft.Web.WebView2.Core.dll,Microsoft.Web.WebView2.Core.dll" "/resource:$wv\Microsoft.Web.WebView2.WinForms.dll,Microsoft.Web.WebView2.WinForms.dll" "/resource:$wv\WebView2Loader.dll,WebView2Loader.dll" `
+  "/r:$fw\System.IO.Compression.dll" "/r:$fw\System.IO.Compression.FileSystem.dll" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Net.dll `
+  "/r:$wv\Microsoft.Web.WebView2.Core.dll" "/r:$wv\Microsoft.Web.WebView2.WinForms.dll" $src
 if ($LASTEXITCODE -ne 0) { throw 'Compile failed' }
 Remove-Item $src
-Write-Host "Built: $exe ($([math]::Round((Get-Item $exe).Length / 1KB)) KB) - version $ver" -ForegroundColor Green
+
+# ---- 4. Update package = app package + the new launcher -----------------------------------------
+$upd = Join-Path $dist 'frame-app.zip'
+Copy-Item $zipPath $upd -Force
+$z = [IO.Compression.ZipFile]::Open($upd, [IO.Compression.ZipArchiveMode]::Update)
+[IO.Compression.ZipFileExtensions]::CreateEntryFromFile($z, $exe, 'launcher/Frame.exe', [IO.Compression.CompressionLevel]::Optimal) | Out-Null
+$z.Dispose()
+Write-Host "Built: $exe ($([math]::Round((Get-Item $exe).Length / 1KB)) KB) and $upd ($([math]::Round((Get-Item $upd).Length / 1KB)) KB) - version $ver" -ForegroundColor Green

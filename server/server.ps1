@@ -22,6 +22,32 @@ $script:RestartCode = 0
 $script:Version = '0.0.0'; $script:Repo = ''
 $vf = Join-Path $Root 'version.json'
 if (Test-Path $vf) { try { $vj = Get-Content $vf -Raw | ConvertFrom-Json; $script:Version = [string]$vj.version; $script:Repo = [string]$vj.repo } catch { } }
+$script:Installed = [bool]($env:LOCALAPPDATA -and $Root.StartsWith($env:LOCALAPPDATA, [StringComparison]::OrdinalIgnoreCase)) -or [bool]$env:FRAME_INSTALL_DIR
+$BackupFile = Join-Path $Root 'backup\migrate.framebackup'
+
+# An update package ships the newest launcher in launcher\Frame.exe. Swap it in (a running exe can be
+# renamed but not overwritten), so the next start of Frame uses it.
+$newLauncher = Join-Path $Root 'launcher\Frame.exe'; $curLauncher = Join-Path $Root 'Frame.exe'; $oldLauncher = Join-Path $Root 'Frame.old.exe'
+if (Test-Path $oldLauncher) { Remove-Item $oldLauncher -Force -ErrorAction SilentlyContinue }
+if ((Test-Path $newLauncher) -and $script:Installed) {
+  try {
+    $need = -not (Test-Path $curLauncher) -or ((Get-FileHash $newLauncher).Hash -ne (Get-FileHash $curLauncher).Hash)
+    if ($need) {
+      if (Test-Path $curLauncher) { if (Test-Path $oldLauncher) { Remove-Item $oldLauncher -Force }; Move-Item $curLauncher $oldLauncher -Force }
+      Copy-Item $newLauncher $curLauncher -Force
+      Write-Host 'Installed the new Frame launcher.' -ForegroundColor Green
+    }
+  } catch { Write-Host "Launcher swap failed: $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+function Test-WebView2 {
+  foreach ($k in @('HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}')) {
+    $pv = (Get-ItemProperty $k -ErrorAction SilentlyContinue).pv
+    if ($pv -and $pv -ne '0.0.0.0') { return $true }
+  }
+  return $false
+}
+$script:NativeReady = $script:Installed -and (Test-WebView2) -and ((Test-Path $newLauncher) -or (Test-Path (Join-Path $Root 'bin\Microsoft.Web.WebView2.Core.dll')))
+
 function Compare-Version($a, $b) {
   $pa = ($a -replace '^v', '').Split('.') | ForEach-Object { [int]($_ -replace '\D', '0') }
   $pb = ($b -replace '^v', '').Split('.') | ForEach-Object { [int]($_ -replace '\D', '0') }
@@ -177,7 +203,27 @@ function Handle-Api($ctx) {
 
   switch -Regex ($path) {
     '^/api/status$' {
-      Send-Json $ctx 200 @{ ok = $true; version = $script:Version; ffmpeg = [bool]$script:Ffmpeg; envKey = [bool]$script:EnvKey; geminiEnv = [bool]$script:GeminiKey; exportDir = $ExportDir }
+      Send-Json $ctx 200 @{ ok = $true; version = $script:Version; installed = $script:Installed; nativeReady = $script:NativeReady; hasBackup = (Test-Path $BackupFile); ffmpeg = [bool]$script:Ffmpeg; envKey = [bool]$script:EnvKey; geminiEnv = [bool]$script:GeminiKey; exportDir = $ExportDir }
+      return
+    }
+    '^/api/backup$' {
+      if ($method -eq 'POST') {
+        New-Item -ItemType Directory -Force (Split-Path $BackupFile) | Out-Null
+        $tmp = "$BackupFile.part"; $fs = [IO.File]::Open($tmp, [IO.FileMode]::Create)
+        try { $req.InputStream.CopyTo($fs) } finally { $fs.Close() }
+        if (Test-Path $BackupFile) { Remove-Item $BackupFile -Force }
+        Move-Item $tmp $BackupFile
+        Send-Json $ctx 200 @{ ok = $true }
+      } elseif (Test-Path $BackupFile) {
+        $fs = [IO.File]::OpenRead($BackupFile)
+        try { $ctx.Response.StatusCode = 200; $ctx.Response.ContentType = 'application/octet-stream'; $ctx.Response.ContentLength64 = $fs.Length; $fs.CopyTo($ctx.Response.OutputStream) }
+        finally { $fs.Close(); $ctx.Response.OutputStream.Close() }
+      } else { Send-Json $ctx 404 @{ error = 'no backup' } }
+      return
+    }
+    '^/api/backup/done$' {
+      if (Test-Path $BackupFile) { Remove-Item "$BackupFile.restored" -Force -ErrorAction SilentlyContinue; Move-Item $BackupFile "$BackupFile.restored" }
+      Send-Json $ctx 200 @{ ok = $true }
       return
     }
     '^/api/update/check$' {

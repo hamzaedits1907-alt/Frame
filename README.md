@@ -5,12 +5,13 @@
 ## Download & install
 
 1. Download **`Frame.exe`** from the [latest release](../../releases/latest).
-2. Double-click it. Frame installs itself (no admin rights needed), adds Start-menu and desktop shortcuts, and opens.
-3. Frame lives in the system tray. Right-click the tray icon to reopen or quit.
+2. Double-click it. Frame installs itself (no admin rights needed), adds Start-menu and desktop shortcuts, and opens in **its own app window**.
 
 **Updates are automatic:** when a new version is out, Frame shows an *Update now* button on the home screen. One click downloads, installs and restarts it. Your projects are kept.
 
-Exports are saved to `Videos\Frame`. Frame needs **Chrome or Edge** (one of them is preinstalled on Windows) and **FFmpeg** for saving videos. On first launch Frame offers to install FFmpeg for you.
+Exports are saved to `Videos\Frame`. Frame uses the WebView2 engine built into Windows 10/11, and **FFmpeg** for saving videos. On first launch Frame offers to install FFmpeg for you. (On a PC without WebView2, Frame opens in Chrome or Edge instead.)
+
+**Moving to another PC:** in Settings, *Download backup* saves all projects and media into one file, and *Restore backup* loads it on the other PC.
 
 ## Studios
 

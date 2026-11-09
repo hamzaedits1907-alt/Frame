@@ -148,7 +148,58 @@ async function showHome() {
     h('div', { style: { height: '30px' } }), recentPhotos, recentPhotos ? h('div', { style: { height: '30px' } }) : null, recentAudio))));
   setTimeout(() => prompt.focus(), 50);
   checkUpdates(false);
+  migrate(status, projects.length + photos.length + audios.length);
 }
+
+// ---------- Moving data between the browser window (old) and the native window (new) ----------
+let migrating = false;
+async function migrate(status, itemCount) {
+  if (migrating) return;
+  const B = await import('./backup.js');
+  const flag = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+  const setFlag = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+  if (!B.isNativeWindow()) {
+    if (!status.installed) return;
+    // Old browser window of an installed copy: hand projects over to the native window.
+    if (itemCount && flag('frame.backupSent') !== status.version) {
+      migrating = true;
+      try {
+        const blob = await B.createBackup();
+        const r = await fetch('/api/backup', { method: 'POST', headers: { 'X-Frame-Client': '1' }, body: blob });
+        if (r.ok) setFlag('frame.backupSent', status.version);
+      } catch (e) { console.warn('backup', e); } finally { migrating = false; }
+    }
+    if (status.nativeReady && !document.querySelector('.native-banner')) {
+      document.querySelector('.home-inner')?.prepend(h('div.update-banner.native-banner', h('span', { html: icon('sparkles', 16) }),
+        h('div', h('b', 'Frame now has its own app window. '), h('span', 'Close this window and open Frame again from the Start menu - your projects come with you.'))));
+    }
+    return;
+  }
+  if (status.hasBackup && !flag('frame.restored')) {
+    migrating = true;
+    let ok = false;
+    modal({ title: 'Bring over your projects?', width: 440, body: h('p.muted', 'Frame found the projects you made in the previous version. Copy them into this window?'),
+      onClose: async () => {
+        if (!ok) { setFlag('frame.restored', 'skipped'); migrating = false; return; }
+        const m = modal({ title: 'Moving your projects…', width: 380, dismissable: false, body: h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center' } }, h('span.spinner'), 'This only takes a moment.') });
+        try {
+          const blob = await (await fetch('/api/backup')).blob();
+          const n = await B.restoreBackup(blob);
+          await fetch('/api/backup/done', { method: 'POST', headers: { 'X-Frame-Client': '1' } });
+          setFlag('frame.restored', '1');
+          m.close(); toast(`Moved ${n} item(s) into Frame`, 'ok'); migrating = false; showHome();
+        } catch (e) { m.close(); migrating = false; toast('Could not move projects: ' + e.message, 'error', 8000); }
+      },
+      actions: [{ label: 'Not now' }, { label: 'Yes, bring them over', primary: true, onClick: () => { ok = true; } }] });
+  }
+}
+
+/** Called by the native window before it closes: save everything that is open. */
+window.__frameFlush = async () => {
+  try { await saveNow(); } catch {}
+  try { await window.framePhoto?.save?.(); } catch {}
+  try { await window.frameAudio?.save?.(); } catch {}
+};
 
 // ---------- Command palette (Ctrl+K) ----------
 async function openPalette() {

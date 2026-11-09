@@ -71,6 +71,22 @@ export async function openSettings(focus) {
       h('div.field', h('label', 'Gemini API key'), gkey, h('div.hint', { html: 'Free at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Used for AI voiceovers and auto captions.' })),
       h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' } }, h('div.field', h('label', 'Default voice'), voice), h('div.field', h('label', 'Default style'), style)),
       h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center' } }, testG, gStatus)),
+    section('Your data', 'Projects, photos, audio and settings',
+      h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+        h('button.btn.sm', { onclick: async () => {
+          const B = await import('./backup.js'); toast('Creating backup…');
+          const blob = await B.createBackup();
+          h('a', { href: URL.createObjectURL(blob), download: `Frame backup ${new Date().toISOString().slice(0, 10)}.framebackup` }).click();
+          toast('Backup saved', 'ok');
+        } }, 'Download backup'),
+        h('button.btn.sm', { onclick: async () => {
+          const B = await import('./backup.js');
+          const f = await new Promise((r) => { const i = h('input', { type: 'file', accept: '.framebackup' }); i.onchange = () => r(i.files[0]); i.click(); });
+          if (!f) return;
+          try { const n = await B.restoreBackup(f); toast(`Restored ${n} item(s) - reloading`, 'ok'); setTimeout(() => { location.hash = '#home'; location.reload(); }, 900); }
+          catch (e) { toast('Restore failed: ' + e.message, 'error', 6000); }
+        } }, 'Restore backup…')),
+      h('div.hint', 'A backup file contains all your projects and imported media. Use it to move Frame to another PC.')),
     h('p.small.muted', { style: { margin: '10px 0 0' } }, 'Keys are stored only on this computer.')),
   actions: [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: () => { save(); toast('Settings saved', 'ok'); } }] });
   if (focus === 'gemini') setTimeout(() => gkey.focus(), 60);
